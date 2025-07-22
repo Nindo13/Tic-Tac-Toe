@@ -1,0 +1,231 @@
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, Linking, ScrollView } from 'react-native';
+
+const emptyBoard = Array(9).fill(null);
+const defaultTheme = {
+  name: 'ocean',
+  backgroundColor: '#00BFFF',
+  textColor: '#000',
+  cellColor: '#87CEFA',
+  winColor: 'yellow',
+};
+
+const themes = {
+  light: { backgroundColor: '#fff', textColor: '#000', cellColor: '#eee', winColor: 'yellow' },
+  ocean: defaultTheme,
+  forest: { backgroundColor: '#228B22', textColor: '#fff', cellColor: '#2E8B57', winColor: 'yellow' },
+  sunset: { backgroundColor: '#FF7F50', textColor: '#000', cellColor: '#FFA07A', winColor: 'yellow' },
+};
+
+export default function App() {
+  const [board, setBoard] = useState([...emptyBoard]);
+  const [xIsNext, setXIsNext] = useState(true);
+  const [winner, setWinner] = useState(null);
+  const [winningCombo, setWinningCombo] = useState([]);
+  const [showModal, setShowModal] = useState(false);
+  const [theme, setTheme] = useState(defaultTheme);
+  const [showThemePicker, setShowThemePicker] = useState(false);
+  const [aiLevel, setAiLevel] = useState('easy');
+  const [isSinglePlayer, setIsSinglePlayer] = useState(true);
+  const [showDifficultyPicker, setShowDifficultyPicker] = useState(false);
+  const [showRewardPopup, setShowRewardPopup] = useState(false);
+  const [rewards, setRewards] = useState([]);
+  const [showGameModePicker, setShowGameModePicker] = useState(false);
+
+  useEffect(() => {
+    if (!winner && isSinglePlayer && !xIsNext) {
+      const timeout = setTimeout(() => {
+        const index = aiMove(board, aiLevel);
+        handlePress(index);
+      }, 500);
+      return () => clearTimeout(timeout);
+    }
+  }, [xIsNext, board, isSinglePlayer]);
+
+  const handlePress = (index) => {
+    if (board[index] || winner) return;
+    const newBoard = [...board];
+    newBoard[index] = xIsNext ? 'X' : 'O';
+    setBoard(newBoard);
+    const result = calculateWinner(newBoard);
+    if (result) {
+      setWinner(result.winner);
+      setWinningCombo(result.combo);
+      setShowModal(true);
+      if (isSinglePlayer && result.winner) {
+        const newReward = {
+          title: result.winner === 'X' ? '🎉 Tillykke du har vundet!' : '😢 Desværre, du tabte – prøv igen!',
+          link: '', // intet link indsat nu
+        };
+        setRewards(prev => [newReward, ...prev.slice(0, 9)]);
+        setShowRewardPopup(true);
+      }
+    } else if (!newBoard.includes(null)) {
+      setWinner('draw');
+      setShowModal(true);
+    } else {
+      setXIsNext(!xIsNext);
+    }
+  };
+
+  const calculateWinner = (squares) => {
+    const lines = [
+      [0,1,2],[3,4,5],[6,7,8],
+      [0,3,6],[1,4,7],[2,5,8],
+      [0,4,8],[2,4,6],
+    ];
+    for (let [a, b, c] of lines) {
+      if (squares[a] && squares[a] === squares[b] && squares[a] === squares[c]) {
+        return { winner: squares[a], combo: [a, b, c] };
+      }
+    }
+    return null;
+  };
+
+  const aiMove = (board, level) => {
+    const emptyIndexes = board.map((v, i) => v ? null : i).filter(v => v !== null);
+    if (level === 'easy') {
+      return emptyIndexes[Math.floor(Math.random() * emptyIndexes.length)];
+    }
+    if (level === 'normal') {
+      for (let i of emptyIndexes) {
+        const copy = [...board];
+        copy[i] = 'O';
+        if (calculateWinner(copy)?.winner === 'O') return i;
+        copy[i] = 'X';
+        if (calculateWinner(copy)?.winner === 'X') return i;
+      }
+      return emptyIndexes[Math.floor(Math.random() * emptyIndexes.length)];
+    }
+    if (level === 'hard') {
+      const { index } = minimax(board, 'O');
+      return index;
+    }
+  };
+
+  const minimax = (newBoard, player) => {
+    const availSpots = newBoard.map((v, i) => v ? null : i).filter(v => v !== null);
+    const result = calculateWinner(newBoard);
+    if (result) {
+      if (result.winner === 'O') return { score: 10 };
+      if (result.winner === 'X') return { score: -10 };
+    } else if (availSpots.length === 0) return { score: 0 };
+
+    const moves = [];
+    for (let i of availSpots) {
+      const move = {};
+      move.index = i;
+      newBoard[i] = player;
+      const next = minimax(newBoard, player === 'O' ? 'X' : 'O');
+      move.score = next.score;
+      newBoard[i] = null;
+      moves.push(move);
+    }
+
+    const best = player === 'O'
+      ? moves.reduce((acc, move) => move.score > acc.score ? move : acc)
+      : moves.reduce((acc, move) => move.score < acc.score ? move : acc);
+    return best;
+  };
+
+  const resetGame = () => {
+    setBoard([...emptyBoard]);
+    setXIsNext(true);
+    setWinner(null);
+    setWinningCombo([]);
+    setShowModal(false);
+  };
+
+  return (
+    <View style={[styles.container, { backgroundColor: theme.backgroundColor }]}>
+      <Text style={[styles.adTop, { color: theme.textColor }]}>// Her er reklameplads</Text>
+      <Text style={[styles.title, { color: theme.textColor }]}>Tic Tac Toe</Text>
+      <View style={styles.board}>
+        {board.map((val, idx) => (
+          <TouchableOpacity
+            key={idx}
+            style={[styles.cell, {
+              backgroundColor: winningCombo.includes(idx) && isSinglePlayer && winner ? theme.winColor : theme.cellColor
+            }]}
+            onPress={() => handlePress(idx)}>
+            <Text style={{ fontSize: 32, color: theme.textColor }}>{val}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <View style={styles.buttons}>
+        <TouchableOpacity style={styles.button} onPress={resetGame}><Text style={styles.buttonText}>Nyt spil</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.button} onPress={() => setShowThemePicker(true)}><Text style={styles.buttonText}>Tema</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.button} onPress={() => setShowDifficultyPicker(true)}><Text style={styles.buttonText}>AI Level ({aiLevel})</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.button} onPress={() => setIsSinglePlayer(!isSinglePlayer)}><Text style={styles.buttonText}>Skift spiltype ({isSinglePlayer ? "1P" : "2P"})</Text></TouchableOpacity>
+        <TouchableOpacity style={styles.button} onPress={() => setShowRewardPopup(true)}><Text style={styles.buttonText}>Mine belønninger</Text></TouchableOpacity>
+      </View>
+
+      {showModal && (
+        <Pressable style={styles.modalOverlay} onPress={() => setShowModal(false)}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>
+              {winner === 'draw' ? '🤝 Uafgjort!' :
+              isSinglePlayer ? (winner === 'X' ? '🎉 Tillykke du har vundet!' : '😢 Desværre, du tabte – prøv igen!') :
+              `🏆 ${winner} har vundet!`}
+            </Text>
+            <TouchableOpacity style={styles.modalButton} onPress={() => { setShowModal(false); resetGame(); }}>
+              <Text style={styles.modalButtonText}>Start nyt spil</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      )}
+
+      {showRewardPopup && (
+        <Pressable style={styles.modalOverlay} onPress={() => setShowRewardPopup(false)}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>Mine belønninger</Text>
+            <ScrollView>{rewards.map((r, i) => (
+              <Text key={i} style={{ color: 'blue' }} onPress={() => r.link && Linking.openURL(r.link)}>{r.title}</Text>
+            ))}</ScrollView>
+          </View>
+        </Pressable>
+      )}
+
+      {showThemePicker && (
+        <View style={styles.popup}>
+          {Object.keys(themes).map((name) => (
+            <Pressable key={name} onPress={() => { setTheme(themes[name]); setShowThemePicker(false); }}>
+              <Text style={{ padding: 10, color: '#000' }}>{name}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+
+      {showDifficultyPicker && (
+        <View style={styles.popup}>
+          {['easy', 'normal', 'hard'].map(level => (
+            <Pressable key={level} onPress={() => { setAiLevel(level); setShowDifficultyPicker(false); }}>
+              <Text style={{ padding: 10, color: '#000' }}>{level}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+
+      <View style={styles.adBottom}><Text style={{ fontStyle: 'italic' }}>// Her er reklameplads</Text></View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, paddingTop: 40, alignItems: 'center', justifyContent: 'flex-start' },
+  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 10 },
+  board: { flexDirection: 'row', flexWrap: 'wrap', width: 300, height: 300 },
+  cell: { width: 100, height: 100, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  buttons: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', marginTop: 20 },
+  button: { backgroundColor: '#007bff', padding: 10, margin: 5, borderRadius: 5 },
+  buttonText: { color: '#fff' },
+  modalOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' },
+  modal: { backgroundColor: '#fff', padding: 20, borderRadius: 10, alignItems: 'center', minWidth: 200 },
+  modalTitle: { fontWeight: 'bold', fontSize: 16, marginBottom: 10, textAlign: 'center' },
+  modalButton: { backgroundColor: '#007bff', padding: 10, borderRadius: 5, marginTop: 10 },
+  modalButtonText: { color: '#fff' },
+  popup: { position: 'absolute', backgroundColor: '#fff', top: 380, borderRadius: 10, padding: 10, elevation: 10 },
+  adTop: { marginBottom: 10 },
+  adBottom: { position: 'absolute', bottom: 10 }
+});
