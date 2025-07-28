@@ -1,0 +1,662 @@
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, ScrollView, Dimensions, Linking } from 'react-native';
+import HenvisningsSDK from './Henvisnings-SDK/HenvisningsSDK'; // <- Korrekt import
+
+const { height, width } = Dimensions.get('window');
+
+const themes = {
+  Ocean: {
+    name: 'Ocean',
+    background: '#cce7f6',
+    board: '#e3f1fa',
+    text: '#125077',
+    cell: '#daf0fc',
+    border: '#2277bb',
+    buttonColor: '#69b8ef',
+    buttonText: '#fff',
+    banner: '#1976d2',
+    selected: '#85e1ff'
+  },
+  Forrest: {
+    name: 'Forrest',
+    background: '#e1f3e1',
+    board: '#d2ecd2',
+    text: '#32531b',
+    cell: '#c0e2c0',
+    border: '#507239',
+    buttonColor: '#78b785',
+    buttonText: '#fff',
+    banner: '#4a7935',
+    selected: '#abebad'
+  },
+  Sunset: {
+    name: 'Sunset',
+    background: '#ffe7cf',
+    board: '#ffe2be',
+    text: '#bb4a14',
+    cell: '#ffecd1',
+    border: '#ff944d',
+    buttonColor: '#ff944d',
+    buttonText: '#fff',
+    banner: '#fa6500',
+    selected: '#ffe6b3'
+  },
+  Light: {
+    name: 'Light',
+    background: '#f8f8f8',
+    board: '#fff',
+    text: '#222',
+    cell: '#fafafa',
+    border: '#bbb',
+    buttonColor: '#ddd',
+    buttonText: '#333',
+    banner: '#aaa',
+    selected: '#e2e2e2'
+  }
+};
+
+const winPatterns = [
+  [0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]
+];
+
+const humanPlayer = 'X';
+const aiPlayer = 'O';
+
+export default function App() {
+  const [themeName, setThemeName] = useState('Ocean');
+  const theme = themes[themeName];
+  const [showThemePopup, setShowThemePopup] = useState(false);
+  const [board, setBoard] = useState(Array(9).fill(''));
+  const [currentPlayer, setCurrentPlayer] = useState('X');
+  const [gameMode, setGameMode] = useState('standard');
+  const [is2PlayerMode, setIs2PlayerMode] = useState(true);
+  const [aiLevel, setAiLevel] = useState('Normal');
+  const [showAiPopup, setShowAiPopup] = useState(false);
+  const [selectedPiece, setSelectedPiece] = useState(null);
+  const [winner, setWinner] = useState(null);
+
+  // --- Belønnings-popup og historik ---
+  const [showRewardPopup, setShowRewardPopup] = useState(false);
+  const [belonningHistory, setBelonningHistory] = useState([]);
+  // --- SDK-popup ---
+  const [showSdkPopup, setShowSdkPopup] = useState(false);
+
+  // Hent historik når popup åbnes
+  useEffect(() => {
+    if (showRewardPopup) {
+      (async () => {
+        const hist = await HenvisningsSDK.getBelonningHistory?.();
+        setBelonningHistory(Array.isArray(hist) ? hist : []);
+      })();
+    }
+  }, [showRewardPopup]);
+
+  // --- SDK Popup når spillet er slut ---
+  useEffect(() => {
+    if (winner) setShowSdkPopup(true);
+  }, [winner]);
+
+  // --------- Spil-logik ---------
+  const minimaxMemo = {};
+  const checkWinner = (board) => {
+    for (let pattern of winPatterns) {
+      const [a, b, c] = pattern;
+      if (board[a] !== '' && board[a] === board[b] && board[b] === board[c]) return board[a];
+    }
+    return null;
+  };
+  const minimax = (boardState, player, visited = new Set()) => {
+    const winnerSymbol = checkWinner(boardState);
+    if (winnerSymbol !== null) return (winnerSymbol === aiPlayer ? 1 : -1);
+    if (gameMode === 'standard' && boardState.every(cell => cell !== '')) return 0;
+    const stateKey = player + boardState.map(cell => cell === '' ? '.' : cell).join('');
+    if (visited.has(stateKey)) return 0;
+    if (minimaxMemo[stateKey] !== undefined) return minimaxMemo[stateKey];
+    visited.add(stateKey);
+    let bestScore = player === aiPlayer ? -Infinity : Infinity;
+    const playerCount = boardState.filter(val => val === player).length;
+    if (gameMode === 'three' && playerCount === 3) {
+      for (let fromIndex = 0; fromIndex < 9; fromIndex++) {
+        if (boardState[fromIndex] === player) {
+          for (let toIndex = 0; toIndex < 9; toIndex++) {
+            if (boardState[toIndex] === '') {
+              const newBoard = boardState.slice();
+              newBoard[fromIndex] = '';
+              newBoard[toIndex] = player;
+              const nextPlayer = (player === 'X' ? 'O' : 'X');
+              const score = minimax(newBoard, nextPlayer, new Set(visited));
+              if (player === aiPlayer) bestScore = Math.max(bestScore, score);
+              else bestScore = Math.min(bestScore, score);
+            }
+          }
+        }
+      }
+    } else {
+      for (let i = 0; i < 9; i++) {
+        if (boardState[i] === '') {
+          const newBoard = boardState.slice();
+          newBoard[i] = player;
+          const nextPlayer = (player === 'X' ? 'O' : 'X');
+          const score = minimax(newBoard, nextPlayer, new Set(visited));
+          if (player === aiPlayer) bestScore = Math.max(bestScore, score);
+          else bestScore = Math.min(bestScore, score);
+        }
+      }
+    }
+    visited.delete(stateKey);
+    minimaxMemo[stateKey] = bestScore;
+    return bestScore;
+  };
+  const bestMoveForAI = () => {
+    let bestScore = -Infinity, bestMove = null, player = aiPlayer;
+    const playerCount = board.filter(val => val === player).length;
+    if (gameMode === 'three' && playerCount === 3) {
+      for (let fromIndex = 0; fromIndex < 9; fromIndex++) {
+        if (board[fromIndex] === player) {
+          for (let toIndex = 0; toIndex < 9; toIndex++) {
+            if (board[toIndex] === '') {
+              const newBoard = board.slice();
+              newBoard[fromIndex] = '';
+              newBoard[toIndex] = player;
+              const score = minimax(newBoard, humanPlayer);
+              if (score > bestScore) { bestScore = score; bestMove = { from: fromIndex, to: toIndex }; }
+            }
+          }
+        }
+      }
+    } else {
+      for (let i = 0; i < 9; i++) {
+        if (board[i] === '') {
+          const newBoard = board.slice();
+          newBoard[i] = player;
+          const score = minimax(newBoard, humanPlayer);
+          if (score > bestScore) { bestScore = score; bestMove = { from: null, to: i }; }
+        }
+      }
+    }
+    return bestMove;
+  };
+  const normalMove = (player) => {
+    const opponent = (player === 'X' ? 'O' : 'X');
+    const playerCount = board.filter(val => val === player).length;
+    if (gameMode === 'standard' || (gameMode === 'three' && playerCount < 3)) {
+      for (let i = 0; i < 9; i++) {
+        if (board[i] === '') {
+          const newBoard = board.slice();
+          newBoard[i] = player;
+          if (checkWinner(newBoard) === player) return { from: null, to: i };
+        }
+      }
+      for (let i = 0; i < 9; i++) {
+        if (board[i] === '') {
+          const newBoard = board.slice();
+          newBoard[i] = opponent;
+          if (checkWinner(newBoard) === opponent) return { from: null, to: i };
+        }
+      }
+      const emptyIndices = board.map((val, idx) => val === '' ? idx : null).filter(idx => idx !== null);
+      if (emptyIndices.length > 0) {
+        const randIndex = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+        return { from: null, to: randIndex };
+      }
+    } else {
+      for (let pattern of winPatterns) {
+        const [a, b, c] = pattern;
+        const values = [board[a], board[b], board[c]];
+        if (values.filter(v => v === player).length === 2 && values.filter(v => v === '').length === 1) {
+          const emptyIdx = [a, b, c][values.indexOf('')];
+          if (board[emptyIdx] === '') {
+            const playerPositions = board.map((v, idx) => v === player ? idx : null).filter(idx => idx !== null);
+            let fromIdx = playerPositions.find(idx => ![a, b, c].includes(idx));
+            if (fromIdx === undefined) fromIdx = playerPositions[0];
+            return { from: fromIdx, to: emptyIdx };
+          }
+        }
+      }
+      for (let pattern of winPatterns) {
+        const [a, b, c] = pattern;
+        const values = [board[a], board[b], board[c]];
+        if (values.filter(v => v === opponent).length === 2 && values.filter(v => v === '').length === 1) {
+          const emptyIdx = [a, b, c][values.indexOf('')];
+          if (board[emptyIdx] === '') {
+            const playerPositions = board.map((v, idx) => v === player ? idx : null).filter(idx => idx !== null);
+            if (playerPositions.length > 0) return { from: playerPositions[0], to: emptyIdx };
+          }
+        }
+      }
+      const playerPositions = board.map((v, idx) => v === player ? idx : null).filter(idx => idx !== null);
+      const emptyIndices = board.map((v, idx) => v === '' ? idx : null).filter(idx => idx !== null);
+      if (playerPositions.length > 0 && emptyIndices.length > 0) {
+        const randFrom = playerPositions[Math.floor(Math.random() * playerPositions.length)];
+        const randTo = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+        return { from: randFrom, to: randTo };
+      }
+    }
+    return null;
+  };
+  const randomMove = (player) => {
+    const playerCount = board.filter(val => val === player).length;
+    if (gameMode === 'three' && playerCount === 3) {
+      const playerPositions = board.map((v, idx) => v === player ? idx : null).filter(idx => idx !== null);
+      const emptyIndices = board.map((v, idx) => v === '' ? idx : null).filter(idx => idx !== null);
+      if (playerPositions.length > 0 && emptyIndices.length > 0) {
+        const fromIdx = playerPositions[Math.floor(Math.random() * playerPositions.length)];
+        const toIdx = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+        return { from: fromIdx, to: toIdx };
+      }
+    } else {
+      const emptyIndices = board.map((v, idx) => v === '' ? idx : null).filter(idx => idx !== null);
+      if (emptyIndices.length > 0) {
+        const toIdx = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+        return { from: null, to: toIdx };
+      }
+    }
+    return null;
+  };
+  const handleAIMove = () => {
+    if (winner || is2PlayerMode || currentPlayer !== aiPlayer) return;
+    let move;
+    if (aiLevel === 'Let') move = randomMove(aiPlayer);
+    else if (aiLevel === 'Normal') move = normalMove(aiPlayer);
+    else if (aiLevel === 'Svær') move = bestMoveForAI();
+    if (move) {
+      const { from, to } = move;
+      const newBoard = board.slice();
+      if (from !== null) newBoard[from] = '';
+      if (to !== null) newBoard[to] = aiPlayer;
+      setSelectedPiece(null);
+      setBoard(newBoard);
+      const winSymbol = checkWinner(newBoard);
+      let draw = false;
+      if (!winSymbol && gameMode === 'standard' && newBoard.every(cell => cell !== '')) draw = true;
+      if (winSymbol || draw) setWinner(winSymbol ? winSymbol : 'draw');
+      else setCurrentPlayer(humanPlayer);
+    }
+  };
+  useEffect(() => {
+    if (!is2PlayerMode && currentPlayer === aiPlayer && !winner) {
+      const timer = setTimeout(() => { handleAIMove(); }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [currentPlayer, is2PlayerMode, winner, aiLevel, board]);
+  const handleSquarePress = (index) => {
+    if (winner) return;
+    if (!is2PlayerMode && currentPlayer === aiPlayer) return;
+    if (gameMode === 'three' && board.filter(v => v === currentPlayer).length === 3) {
+      if (selectedPiece === null) {
+        if (board[index] === currentPlayer) setSelectedPiece(index);
+      } else {
+        if (board[index] === '') {
+          const newBoard = board.slice();
+          newBoard[selectedPiece] = '';
+          newBoard[index] = currentPlayer;
+          setBoard(newBoard);
+          setSelectedPiece(null);
+          const winSymbol = checkWinner(newBoard);
+          let draw = false;
+          if (!winSymbol && gameMode === 'standard' && newBoard.every(cell => cell !== '')) draw = true;
+          if (winSymbol || draw) setWinner(winSymbol ? winSymbol : 'draw');
+          else setCurrentPlayer(currentPlayer === 'X' ? 'O' : 'X');
+        } else if (board[index] === currentPlayer) {
+          if (index === selectedPiece) setSelectedPiece(null);
+          else setSelectedPiece(index);
+        }
+      }
+    } else {
+      if (board[index] === '') {
+        const newBoard = board.slice();
+        newBoard[index] = currentPlayer;
+        setBoard(newBoard);
+        const winSymbol = checkWinner(newBoard);
+        let draw = false;
+        if (!winSymbol && gameMode === 'standard' && newBoard.every(cell => cell !== '')) draw = true;
+        if (winSymbol || draw) setWinner(winSymbol ? winSymbol : 'draw');
+        else setCurrentPlayer(currentPlayer === 'X' ? 'O' : 'X');
+      }
+    }
+  };
+  const resetGame = () => {
+    setBoard(Array(9).fill(''));
+    setCurrentPlayer('X');
+    setWinner(null);
+    setSelectedPiece(null);
+    setShowSdkPopup(false);
+  };
+  const changeTheme = (name) => {
+    setThemeName(name);
+    setShowThemePopup(false);
+  };
+
+  // --- UI Placering ---
+  const boardSize = Math.min(width * 0.7, 340);
+  const cellSize = boardSize / 3;
+  const themeBtnOffset = 48 + 8;
+  const boardTopOffset = themeBtnOffset + 36;
+  // --- Placer banner og knap længere oppe end før ---
+  const rewardBtnDistanceFromBottom = 120;
+  const bannerDistanceFromBottom = 60;
+
+  return (
+    <View style={[styles.root, { backgroundColor: theme.background }]}>
+      {/* Tema-knap */}
+      <TouchableOpacity
+        style={[
+          styles.themeButton,
+          { backgroundColor: theme.buttonColor, top: themeBtnOffset, right: 20 }
+        ]}
+        onPress={() => setShowThemePopup(true)}
+      >
+        <Text style={[styles.buttonLabel, { color: theme.buttonText }]}>Vælg tema</Text>
+      </TouchableOpacity>
+
+      {/* Main-indhold */}
+      <ScrollView
+        contentContainerStyle={{
+          paddingTop: boardTopOffset,
+          paddingBottom: rewardBtnDistanceFromBottom + 80,
+          minHeight: height * 0.86,
+          alignItems: 'center',
+          justifyContent: 'flex-start'
+        }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={[styles.statusText, { color: theme.text, marginBottom: 20 }]}>
+          {winner ? (winner === 'draw' ? 'Uafgjort!' : `${winner} vinder!`) : `Tur: ${currentPlayer}`}
+        </Text>
+
+        {/* Spillebræt */}
+        <View
+          style={[
+            styles.board,
+            {
+              width: boardSize,
+              height: boardSize,
+              backgroundColor: theme.board,
+              borderColor: theme.border
+            }
+          ]}
+        >
+          {Array(3).fill(0).map((_, row) =>
+            <View key={row} style={{ flexDirection: 'row', flex: 1 }}>
+              {Array(3).fill(0).map((_, col) => {
+                const idx = row * 3 + col;
+                const isSelected = (gameMode === 'three' && selectedPiece === idx);
+                return (
+                  <TouchableOpacity
+                    key={col}
+                    style={[
+                      styles.cell,
+                      {
+                        width: cellSize, height: cellSize,
+                        backgroundColor: isSelected ? theme.selected : theme.cell,
+                        borderTopWidth: row > 0 ? 2 : 0,
+                        borderLeftWidth: col > 0 ? 2 : 0,
+                        borderColor: theme.border
+                      }
+                    ]}
+                    onPress={() => handleSquarePress(idx)}
+                    activeOpacity={0.82}
+                  >
+                    <Text style={[
+                      styles.cellText,
+                      { color: theme.text }
+                    ]}>
+                      {board[idx]}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+        </View>
+
+        {/* Knapper */}
+        <View style={[styles.buttonRow, { marginTop: 36 }]}>
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: theme.buttonColor }]}
+            onPress={resetGame}
+          >
+            <Text style={[styles.buttonLabel, { color: theme.buttonText }]}>Nyt spil</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: theme.buttonColor }]}
+            onPress={() => setIs2PlayerMode(!is2PlayerMode)}
+          >
+            <Text style={[styles.buttonLabel, { color: theme.buttonText }]}>
+              {is2PlayerMode ? 'Spil mod computer' : '2 spillere'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: theme.buttonColor }]}
+            onPress={() => setGameMode(gameMode === 'three' ? 'standard' : 'three')}
+          >
+            <Text style={[styles.buttonLabel, { color: theme.buttonText }]}>
+              {gameMode === 'three' ? 'Skift til Standard' : 'Trebriks-spil'}
+            </Text>
+          </TouchableOpacity>
+          {!is2PlayerMode && (
+            <TouchableOpacity
+              style={[styles.button, { backgroundColor: theme.buttonColor }]}
+              onPress={() => setShowAiPopup(true)}
+            >
+              <Text style={[styles.buttonLabel, { color: theme.buttonText }]}>
+                Sværhedsgrad: {aiLevel}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </ScrollView>
+
+      {/* --- Mine belønninger knap --- */}
+      <View style={{
+        position: 'absolute',
+        left: 0, right: 0,
+        bottom: rewardBtnDistanceFromBottom,
+        alignItems: 'center',
+        zIndex: 20
+      }}>
+        <TouchableOpacity
+          style={[styles.rewardButton, { backgroundColor: theme.buttonColor }]}
+          onPress={() => setShowRewardPopup(true)}
+        >
+          <Text style={[styles.buttonLabel, { color: theme.buttonText }]}>Mine belønninger</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* --- Banner --- */}
+      <View style={[
+        styles.banner,
+        {
+          backgroundColor: theme.banner,
+          position: 'absolute',
+          left: 0, right: 0,
+          bottom: bannerDistanceFromBottom,
+          height: 46,
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 10
+        }
+      ]}>
+        <Text style={{ color: "#fff", fontWeight: 'bold' }}>Reklamebanner her (eksempel)</Text>
+      </View>
+
+      {/* --- Tema popup --- */}
+      <Modal
+        transparent={true}
+        visible={showThemePopup}
+        animationType="fade"
+        onRequestClose={() => setShowThemePopup(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setShowThemePopup(false)}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Vælg tema</Text>
+            {Object.keys(themes).map((t) => (
+              <Pressable
+                key={t}
+                style={[
+                  styles.modalButton,
+                  { backgroundColor: themes[t].buttonColor }
+                ]}
+                onPress={() => changeTheme(t)}
+              >
+                <Text style={[styles.buttonLabel, { color: themes[t].buttonText }]}>
+                  {themes[t].name}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* --- AI niveau popup --- */}
+      <Modal
+        transparent={true}
+        visible={showAiPopup}
+        animationType="fade"
+        onRequestClose={() => setShowAiPopup(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setShowAiPopup(false)}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Vælg AI-niveau</Text>
+            {['Let', 'Normal', 'Svær'].map((level) => (
+              <Pressable
+                key={level}
+                style={[styles.modalButton, { backgroundColor: theme.buttonColor }]}
+                onPress={() => { setAiLevel(level); setShowAiPopup(false); }}
+              >
+                <Text style={[styles.buttonLabel, { color: theme.buttonText }]}>{level}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* --- Mine belønninger popup --- */}
+      <Modal
+        transparent={true}
+        visible={showRewardPopup}
+        animationType="fade"
+        onRequestClose={() => setShowRewardPopup(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setShowRewardPopup(false)}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Seneste belønninger</Text>
+            <ScrollView style={{ maxHeight: 320, minWidth: 220 }}>
+              {belonningHistory && belonningHistory.length > 0 ? (
+                belonningHistory.slice(-10).reverse().map((reward, i) => (
+                  <Pressable
+                    key={i}
+                    onPress={() => reward.link && Linking.openURL(reward.link)}
+                  >
+                    <View style={{
+                      marginVertical: 6, padding: 7, borderBottomWidth: 1, borderColor: "#e5e5e5"
+                    }}>
+                      <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{reward.titel || reward.title}</Text>
+                      {reward.beskrivelse && (
+                        <Text style={{ fontSize: 14 }}>{reward.beskrivelse}</Text>
+                      )}
+                      <Text style={{ fontSize: 13, color: '#1976d2', textDecorationLine: 'underline' }}>
+                        {reward.link}
+                      </Text>
+                    </View>
+                  </Pressable>
+                ))
+              ) : (
+                <Text style={{ textAlign: 'center', margin: 15 }}>Ingen belønninger endnu</Text>
+              )}
+            </ScrollView>
+            <Pressable
+              style={[styles.modalButton, { marginTop: 16, backgroundColor: theme.buttonColor }]}
+              onPress={() => setShowRewardPopup(false)}
+            >
+              <Text style={[styles.buttonLabel, { color: theme.buttonText }]}>Luk</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* --- HENVISNINGS SDK POPUP --- */}
+      <HenvisningsSDK
+        visible={showSdkPopup}
+        onClose={() => setShowSdkPopup(false)}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, width: '100%' },
+  themeButton: {
+    position: 'absolute',
+    zIndex: 3,
+    paddingVertical: 7,
+    paddingHorizontal: 15,
+    borderRadius: 8,
+    elevation: 2,
+    minWidth: 105,
+    alignSelf: 'flex-end',
+    top: 48
+  },
+  statusText: { fontSize: 22, fontWeight: 'bold', textAlign: 'center' },
+  board: {
+    alignSelf: 'center',
+    borderWidth: 3,
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginBottom: 10,
+    marginTop: 0
+  },
+  cell: { justifyContent: 'center', alignItems: 'center' },
+  cellText: { fontSize: 36, fontWeight: 'bold' },
+  selected: { borderColor: '#18f', borderWidth: 4 },
+  buttonRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    marginTop: 36,
+    marginBottom: 10,
+  },
+  button: {
+    margin: 7,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    minWidth: 112,
+    alignItems: 'center',
+    elevation: 1
+  },
+  buttonLabel: { fontSize: 15, fontWeight: 'bold', textAlign: 'center' },
+  rewardButton: {
+    borderRadius: 8,
+    paddingVertical: 13,
+    paddingHorizontal: 38,
+    minWidth: 145,
+    marginBottom: 12,
+    alignItems: 'center',
+    elevation: 1,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.20)',
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    padding: 22,
+    borderRadius: 12,
+    minWidth: '64%',
+    alignItems: 'center'
+  },
+  modalTitle: { fontSize: 19, fontWeight: 'bold', marginBottom: 10 },
+  modalButton: {
+    borderRadius: 7,
+    paddingVertical: 11,
+    paddingHorizontal: 25,
+    marginVertical: 7,
+    marginHorizontal: 2,
+    width: '80%',
+    alignItems: 'center'
+  },
+  banner: { width: '100%', elevation: 6 }
+});
