@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, ScrollView, Dimensions, Linking } from 'react-native';
-import HenvisningsSDK from './Henvisnings-SDK/HenvisningsSDK'; // <- Korrekt import
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, ScrollView, Dimensions, Linking, Image } from 'react-native';
+import HenvisningsSDK from './Henvisnings-SDK/HenvisningsSDK';
 
 const { height, width } = Dimensions.get('window');
 
@@ -63,6 +63,15 @@ const humanPlayer = 'X';
 const aiPlayer = 'O';
 
 export default function App() {
+  // --- SPLASH ---
+  const [showSplash, setShowSplash] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShowSplash(false), 1500); // 1.5 sekund
+    return () => clearTimeout(timer);
+  }, []);
+
+  // --- RESTEN AF STATES ---
   const [themeName, setThemeName] = useState('Ocean');
   const theme = themes[themeName];
   const [showThemePopup, setShowThemePopup] = useState(false);
@@ -80,8 +89,14 @@ export default function App() {
   const [belonningHistory, setBelonningHistory] = useState([]);
   // --- SDK-popup ---
   const [showSdkPopup, setShowSdkPopup] = useState(false);
+  // --- Privacy Policy ---
+  const [showPrivacyPopup, setShowPrivacyPopup] = useState(false);
 
-  // Hent historik når popup åbnes
+  // Til popup-knappernes placering
+  const bannerDistanceFromBottom = 60;
+  const privacyBtnDistanceFromBottom = bannerDistanceFromBottom + 60; // 120
+  const rewardBtnDistanceFromBottom = privacyBtnDistanceFromBottom + 60; // 180
+
   useEffect(() => {
     if (showRewardPopup) {
       (async () => {
@@ -91,12 +106,11 @@ export default function App() {
     }
   }, [showRewardPopup]);
 
-  // --- SDK Popup når spillet er slut ---
   useEffect(() => {
     if (winner) setShowSdkPopup(true);
   }, [winner]);
 
-  // --------- Spil-logik ---------
+  // --------- Spil-logik (samme som tidligere) ---------
   const minimaxMemo = {};
   const checkWinner = (board) => {
     for (let pattern of winPatterns) {
@@ -332,10 +346,22 @@ export default function App() {
   const cellSize = boardSize / 3;
   const themeBtnOffset = 48 + 8;
   const boardTopOffset = themeBtnOffset + 36;
-  // --- Placer banner og knap længere oppe end før ---
-  const rewardBtnDistanceFromBottom = 120;
-  const bannerDistanceFromBottom = 60;
 
+  // -------- SPLASH SCREEN --------
+  if (showSplash) {
+    return (
+      <View style={styles.splashRoot}>
+        <Image
+          source={require('./assets/splash.png')}
+          style={styles.splashImage}
+          resizeMode="contain"
+        />
+        <Text style={styles.splashText}>Klassisk Tre på Stribe</Text>
+      </View>
+    );
+  }
+
+  // --------- HOVED APP ---------
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
       {/* Tema-knap */}
@@ -463,11 +489,27 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
+      {/* --- Privatlivspolitik knap --- */}
+      <View style={{
+        position: 'absolute',
+        left: 0, right: 0,
+        bottom: privacyBtnDistanceFromBottom,
+        alignItems: 'center',
+        zIndex: 21
+      }}>
+        <TouchableOpacity
+          style={[styles.privacyButton, { backgroundColor: theme.buttonColor }]}
+          onPress={() => setShowPrivacyPopup(true)}
+        >
+          <Text style={[styles.buttonLabel, { color: theme.buttonText }]}>Privatlivspolitik</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* --- Banner --- */}
       <View style={[
         styles.banner,
         {
-          backgroundColor: theme.banner,
+          backgroundColor: '#b3b3b3',
           position: 'absolute',
           left: 0, right: 0,
           bottom: bannerDistanceFromBottom,
@@ -575,6 +617,41 @@ export default function App() {
         </Pressable>
       </Modal>
 
+      {/* --- Privatlivspolitik popup --- */}
+      <Modal
+        transparent={true}
+        visible={showPrivacyPopup}
+        animationType="slide"
+        onRequestClose={() => setShowPrivacyPopup(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setShowPrivacyPopup(false)}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Privatlivspolitik</Text>
+            <Text style={{ marginBottom: 12, color: '#333', fontSize: 15 }}>
+              Du kan læse den fulde privatlivspolitik online:
+            </Text>
+            <TouchableOpacity
+              onPress={() => Linking.openURL('https://docs.google.com/document/d/1Xl6zVLdHMUrHFAToE99g8ypadfAJGx6Rzl9EhFLfh5Q/edit?usp=sharing')}
+              style={{
+                padding: 12,
+                backgroundColor: '#b3b3b3',
+                borderRadius: 8,
+                marginBottom: 14
+              }}>
+              <Text style={{ color: '#fff', fontWeight: 'bold', textAlign: 'center' }}>
+                Åbn privatlivspolitik
+              </Text>
+            </TouchableOpacity>
+            <Pressable
+              style={[styles.modalButton, { backgroundColor: theme.buttonColor }]}
+              onPress={() => setShowPrivacyPopup(false)}
+            >
+              <Text style={[styles.buttonLabel, { color: theme.buttonText }]}>Luk</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
       {/* --- HENVISNINGS SDK POPUP --- */}
       <HenvisningsSDK
         visible={showSdkPopup}
@@ -586,6 +663,24 @@ export default function App() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, width: '100%' },
+  splashRoot: {
+    flex: 1,
+    backgroundColor: '#cce7f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%'
+  },
+  splashImage: {
+    width: 180,
+    height: 180,
+    marginBottom: 24,
+  },
+  splashText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#0e375c'
+  },
   themeButton: {
     position: 'absolute',
     zIndex: 3,
@@ -635,6 +730,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     elevation: 1,
   },
+  privacyButton: {
+    borderRadius: 8,
+    paddingVertical: 11,
+    paddingHorizontal: 30,
+    minWidth: 145,
+    marginBottom: 5,
+    alignItems: 'center',
+    elevation: 1,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.20)',
@@ -660,3 +764,4 @@ const styles = StyleSheet.create({
   },
   banner: { width: '100%', elevation: 6 }
 });
+
